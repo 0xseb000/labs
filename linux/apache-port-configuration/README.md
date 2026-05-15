@@ -10,7 +10,7 @@
 The lab consists of an **Ubuntu Host** running several **CentOS containers** (stapp01, stapp02, stapp03). Connection is made via a **Jump Host**.
 
 ```
-Ubuntu Host (Kernel: 6.8.0-90-generic)
+Ubuntu Host
 └── LXC Containers
     ├── stapp01 (CentOS) ← target
     ├── stapp02 (CentOS)
@@ -24,7 +24,7 @@ Ubuntu Host (Kernel: 6.8.0-90-generic)
 
 ## Tools: telnet & ss/netstat
 
-### telnet — Connectivity Tester
+### telnet
 
 ```bash
 telnet <host> <port>
@@ -44,7 +44,7 @@ Exit connection: `Ctrl + ]` then `quit`
 
 ---
 
-### ss — Socket Status (modern netstat replacement)
+### ss (Socket Status)
 
 ```bash
 # All listening TCP ports
@@ -72,9 +72,6 @@ LISTEN 0  10  127.0.0.1:8088  0.0.0.0:*  users:(("sendmail",pid=8778,fd=4))
 | `0.0.0.0:8088`   | listening on all interfaces |
 | `sendmail`       | process holding the port    |
 | `pid=8778`       | process ID                  |
-
-> `netstat` is not directly installable → `sudo yum install net-tools`  
-> On modern systems prefer `ss` directly.
 
 ---
 
@@ -123,7 +120,7 @@ COMMIT
 
 ```bash
 # 1. Edit the configuration file
-sudo vi /etc/sysconfig/iptables
+sudo vim /etc/sysconfig/iptables
 
 # Add the following line BEFORE the REJECT line:
 -A INPUT -p tcp -m state --state NEW -m tcp --dport 8088 -j ACCEPT
@@ -141,36 +138,28 @@ sudo iptables -L -n | grep 8088
 sudo systemctl status iptables
 ```
 
-> `active (exited)` is **normal** for iptables — the process loads rules into the kernel and exits. The rules remain active.
+> `active (exited)` is **normal** for iptables. The process loads rules into the kernel and exits. The rules remain active.
 
 ---
 
 ## httpd (Apache) on CentOS
 
-### Key commands
+### Check configuration
 
 ```bash
-sudo systemctl start httpd
-sudo systemctl stop httpd
-sudo systemctl restart httpd
-sudo systemctl status httpd
-
-# Check configuration
 sudo grep -i "listen" /etc/httpd/conf/httpd.conf
 ```
 
 ### Error: Address already in use
 
-```
+
 (98)Address already in use: AH00072: make_sock: could not bind to address
 no listening sockets available, shutting down
-```
 
-**Meaning:** Another process is already using the port httpd wants to bind to.
+Another process is already using the port httpd wants to bind to.
 
-**Diagnose:**
 ```bash
-sudo ss -tlnp | grep 8088
+sudo ss -tlnp | grep 8083
 sudo ps aux | grep httpd
 ```
 
@@ -192,7 +181,7 @@ sudo ss -tlnp | grep 8088
 
 | File          | Purpose                                       |
 |---------------|-----------------------------------------------|
-| `sendmail.mc` | Source file (human-readable, edit this)       |
+| `sendmail.mc` | Source file (human-readable)                  |
 | `sendmail.cf` | Generated configuration (Sendmail reads this) |
 | `m4`          | Compiler that transforms `.mc` into `.cf`     |
 
@@ -203,7 +192,7 @@ sendmail.mc  →  m4    →  sendmail.cf
 .scss        →  sass  →  .css
 ```
 
-> Never edit `sendmail.cf` directly — changes will be overwritten on the next `m4` run.
+> Never edit `sendmail.cf` directly. Changes will be overwritten on the next `m4` run.
 
 ### Changing the port (best practice)
 
@@ -216,7 +205,7 @@ sudo cp /etc/mail/sendmail.cf /etc/mail/sendmail.cf.bak
 grep -n "Port" /etc/mail/sendmail.mc
 
 # 3. Edit source file
-sudo vi /etc/mail/sendmail.mc
+sudo vim /etc/mail/sendmail.mc
 ```
 
 Change from:
@@ -230,71 +219,51 @@ DAEMON_OPTIONS(`Port=25,Addr=127.0.0.1, Name=MTA')dnl
 ```
 
 ```bash
-# 4. Recompile
-sudo m4 /etc/mail/sendmail.mc > /etc/mail/sendmail.cf
-
-# 5. Restart sendmail
+# 4. Restart sendmail
 sudo systemctl restart sendmail
 
-# 6. Verify
-sudo ss -tlnp | grep -E "25|8088"
+# 5. Verify
+sudo ss -tlnp | grep "25"
 ```
 
-### Standard SMTP ports
+### Standard SMTP port
 
 | Port  | Usage                                    |
 |-------|------------------------------------------|
 | 25    | Standard SMTP (server to server)         |
-| 587   | Submission (client to server, with auth) |
-| 465   | SMTPS (encrypted)                        |
 
 ### What is m4?
 
 `m4` is a **macro processor** — it reads an input file, expands macros into their full content, and outputs the result. It is a general Unix tool used by many programs, not just Sendmail.
 
 ```
-You write (readable)        m4 expands          Machine reads (complex)
+You write (readable)           m4 expands          Machine reads (complex)
 ────────────────────────────────────────────────────────────────────────
-DAEMON_OPTIONS(`Port=25')   ──────────────►     O DaemonPortOptions=Port=25,...
+DAEMON_OPTIONS(`Port=25')      ---------->         O DaemonPortOptions=Port=25,...
 ```
 
 ### What is dnl?
 
-`dnl` stands for **"delete to next line"** — it is the comment syntax in m4.
+`dnl` stands for **"delete to next line"**. Comment syntax in m4.
 
 ```
-dnl DAEMON_OPTIONS(...)   ← this line is ignored / commented out
-DAEMON_OPTIONS(...)       ← this line is active
+dnl DAEMON_OPTIONS(...)   <- this line is ignored / commented out
+DAEMON_OPTIONS(...)       <- this line is active
 ```
 
 ---
 
 ## Diagnosing: Port not reachable
 
+```bash
+curl http://stapp01:8083
 ```
-curl: (7) Failed to connect to stapp01 port 8088: Connection refused
-```
+
+> curl: Failed to connect to stapp01 port 8088: Connection refused
 
 ```bash
-# 1. Is anything listening on the port?
-sudo ss -tlnp | grep 8088
-
-# → nothing: service not running or wrong port configured
-
-# 2. Which process is blocking?
-sudo fuser 8088/tcp
-sudo ps aux | grep <processname>
-
-# 3. Check firewall
-sudo iptables -L -n | grep 8088
-
-# 4. Check configuration
-sudo grep -i "listen" /etc/httpd/conf/httpd.conf
-grep -n "Port" /etc/mail/sendmail.mc
-
-# 5. Check logs
+sudo ss -tlnp | grep 8083
 sudo systemctl status httpd
-sudo tail -f /var/log/maillog
 ```
 
 ### Error messages compared
@@ -307,22 +276,29 @@ sudo tail -f /var/log/maillog
 
 ---
 
-## Finding Firewalls on Linux
+## Firewall on CentOS
 
 ```bash
-# firewalld (CentOS/RHEL default)
+# Check status
 sudo systemctl status firewalld
-sudo firewall-cmd --list-all
-
-# iptables (classic)
 sudo systemctl status iptables
-sudo iptables -L -n -v
 
-# ufw (Debian/Ubuntu)
-sudo ufw status verbose
+# Find configuration file
+sudo find / -type f -name iptables
 
-# nftables (modern replacement)
-sudo nft list ruleset
+# Edit configuration
+sudo vim /etc/sysconfig/iptables
+```
+
+Added rule to `/etc/sysconfig/iptables` before the REJECT line:
+
+```
+-A INPUT -p tcp -m state --state NEW -m tcp --dport 8083 -j ACCEPT
+```
+
+```bash
+# Reload
+sudo systemctl restart iptables
 ```
 
 ---
@@ -330,29 +306,23 @@ sudo nft list ruleset
 ## Useful Commands Reference
 
 ```bash
-# Identify OS (not uname!)
+# Identify OS
 cat /etc/os-release
 cat /etc/redhat-release
 
 # Find process on a port
-sudo fuser 8088/tcp
 sudo ss -tlnp | grep 8088
 
 # Search inside a file
 grep -n "searchterm" /path/to/file
-grep -rn "8088" /etc/          # recursive with line numbers
 
 # Find files by name
 sudo find /etc -type f -name "sendmail*"
-
-# Compare timestamps (which is newer?)
-ls -la /etc/mail/sendmail.mc
-ls -la /etc/mail/sendmail.cf
 ```
 
 ---
 
-## Summary: What We Did
+## Summary
 
 1. **Opened port 8088 in iptables** — added rule to `/etc/sysconfig/iptables`
 2. **Discovered port conflict** — Sendmail was occupying port 8088
